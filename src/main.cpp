@@ -6,6 +6,7 @@
 
 // for convenience
 using json = nlohmann::json;
+using namespace std;
 
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
@@ -28,12 +29,13 @@ std::string hasData(std::string s) {
   return "";
 }
 
-int main()
+int main(int argc, char *argv[]) // pass arguments in the command line
 {
   uWS::Hub h;
 
   PID pid;
   // TODO: Initialize the pid variable.
+  pid.Init(atof(argv[1]),atof(argv[2]),atof(argv[3])); //-0.5,0,-1.0 first pass
 
   h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
@@ -57,6 +59,24 @@ int main()
           * NOTE: Feel free to play around with the throttle and speed. Maybe use
           * another PID controller to control the speed!
           */
+
+          pid.UpdateError(cte);
+
+          // cout<<"this is pid.Kp: "<<pid.Kp<<", pid.p_error: "<<pid.p_error<<", pid.Kd: "<<pid.Kd<<", pid.d_error: "<<pid.d_error<<", pid.Ki: "<<pid.Ki<<", pid.i_error: "<<pid.i_error<<endl;
+
+          double steering_range [2] = {-1.0, 1.0};
+
+          steer_value = pid.TotalError();
+
+          if (steer_value > steering_range[1]) {
+            steer_value = steering_range[1];
+          } else if (steer_value < steering_range[0]) {
+            steer_value = steering_range[0];
+          }
+
+          
+
+          // TODO: tune parameters using Twiddle
           
           // DEBUG
           std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
