@@ -8,10 +8,12 @@
 using json = nlohmann::json;
 using namespace std;
 
+
 // For converting back and forth between radians and degrees.
 constexpr double pi() { return M_PI; }
 double deg2rad(double x) { return x * pi() / 180; }
 double rad2deg(double x) { return x * 180 / pi(); }
+
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -29,20 +31,41 @@ std::string hasData(std::string s) {
   return "";
 }
 
+// Variables used for twiddle
+int measurements = 0;
+double best_err = 0;
+double tot_err = 0;
+
+int param_inc = 0; //used to alternate the 2 parameters
+bool second_pass = false; // switch variable keep track of whether to add dp[param_inc] to p[param_inc] or use multiplier
+
+vector<double> p;
+vector<double> dp;
+
 int main(int argc, char *argv[]) // pass arguments in the command line
 {
   uWS::Hub h;
 
+  // initialize twiddle parameter vectors
+  dp.push_back(0.1);
+  dp.push_back(0.1);
+
+  p.push_back(atof(argv[1]));
+  p.push_back(atof(argv[3]));
+
   PID pid;
-  // TODO: Initialize the pid variable.
-  pid.Init(atof(argv[1]),atof(argv[2]),atof(argv[3])); //-0.5,0,-1.0 first pass
+  
+  pid.Init(atof(argv[1]),atof(argv[2]),atof(argv[3])); //0.09, 0, 2.0 final pass
+
+  p = { atof(argv[1]) + dp[0],atof(argv[2]),atof(argv[3]) };
 
   h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
+    
     if (length && length > 2 && data[0] == '4' && data[1] == '2')
-    {
+    { 
       auto s = hasData(std::string(data).substr(0, length));
       if (s != "") {
         auto j = json::parse(s);
@@ -53,16 +76,8 @@ int main(int argc, char *argv[]) // pass arguments in the command line
           double speed = std::stod(j[1]["speed"].get<std::string>());
           double angle = std::stod(j[1]["steering_angle"].get<std::string>());
           double steer_value;
-          /*
-          * TODO: Calcuate steering value here, remember the steering value is
-          * [-1, 1].
-          * NOTE: Feel free to play around with the throttle and speed. Maybe use
-          * another PID controller to control the speed!
-          */
-
+          
           pid.UpdateError(cte);
-
-          // cout<<"this is pid.Kp: "<<pid.Kp<<", pid.p_error: "<<pid.p_error<<", pid.Kd: "<<pid.Kd<<", pid.d_error: "<<pid.d_error<<", pid.Ki: "<<pid.Ki<<", pid.i_error: "<<pid.i_error<<endl;
 
           double steering_range [2] = {-1.0, 1.0};
 
@@ -74,9 +89,49 @@ int main(int argc, char *argv[]) // pass arguments in the command line
             steer_value = steering_range[0];
           }
 
+          // keep track of tot_err for parameter tuning
+          tot_err += fabs(cte);
           
-
-          // TODO: tune parameters using Twiddle
+          measurements = measurements + 1;
+          
+          // perform twiddle at every 200 measurements
+          if (measurements % 200 == 0) {
+            // implement twiddle
+            if (best_err == 0) {
+              // initial setup for best_err, do not perform parameter tuning
+              best_err = tot_err;
+            } else {
+              double sum = dp[0] + dp[1] + dp[2];
+  
+              if (sum > 0.001) {
+                if (param_inc == 2) {
+                  param_inc = 0;
+                }
+    
+                if (tot_err < best_err) {
+                  best_err = tot_err;
+                  dp[param_inc] *= 1.1;
+                  param_inc++;
+                  p[param_inc] += dp[param_inc];
+                  second_pass = false;
+                } else if (second_pass) {
+                  p[param_inc] += dp[param_inc]; //consider removing
+                  dp[param_inc] *= 0.9;
+                  param_inc++;
+                  second_pass = false;
+                } else {
+                  p[param_inc] -= 2 * dp[param_inc];
+                  second_pass = true;
+                  // do not increment param_inc;
+                }
+  
+                tot_err = 0;
+  
+                pid.Kp = p[0];
+                pid.Kd = p[2];
+              }
+            }
+          }
           
           // DEBUG
           std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
